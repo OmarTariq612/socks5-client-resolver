@@ -26,6 +26,7 @@ func (r *Relay) Serve() error {
 	}
 	defer listener.Close()
 	log.Printf("Serving on %v\n", r.bindAddr)
+	log.Printf("the provided server address is %v\n", r.serverAddr)
 
 	for {
 		conn, err := listener.Accept()
