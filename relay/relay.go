@@ -6,6 +6,8 @@ import (
 	"log"
 	"net"
 	"time"
+
+	"github.com/OmarTariq612/socks5-client-resolver/relay/auth"
 )
 
 type Relay struct {
@@ -50,11 +52,13 @@ func (r *Relay) Serve() error {
 }
 
 func handleConnection(clientConn, serverConn io.ReadWriter) error {
-	err := relayHandshake(clientConn, serverConn)
+	authCode, err := relayHandshake(clientConn, serverConn)
 	if err != nil {
 		return err
 	}
-
+	if err := handleAuth(authCode, clientConn, serverConn); err != nil {
+		return err
+	}
 	err = relayRequestReply(clientConn, serverConn)
 	if err != nil {
 		return err
@@ -79,34 +83,44 @@ func handleConnection(clientConn, serverConn io.ReadWriter) error {
 	return <-errc
 }
 
-func relayHandshake(clientConn, serverConn io.ReadWriter) error {
+func relayHandshake(clientConn, serverConn io.ReadWriter) (authCode int, err error) {
 	var buf [2]byte
-	_, err := io.ReadFull(clientConn, buf[:])
+	_, err = io.ReadFull(clientConn, buf[:])
 	if err != nil {
-		return fmt.Errorf("could not read handshake header (socks_version + n_methods) from the client")
+		return -1, fmt.Errorf("could not read handshake header (socks_version + n_methods) from the client")
 	}
 	_, err = serverConn.Write(buf[:])
 	if err != nil {
-		return fmt.Errorf("could not write handshake header (socks_version + n_methods) to the server")
+		return -1, fmt.Errorf("could not write handshake header (socks_version + n_methods) to the server")
 	}
 	methods := make([]byte, buf[1])
 	_, err = io.ReadFull(clientConn, methods)
 	if err != nil {
-		return fmt.Errorf("could not read methods from the client")
+		return -1, fmt.Errorf("could not read methods from the client")
 	}
 	_, err = serverConn.Write(methods)
 	if err != nil {
-		return fmt.Errorf("could not write methods to the server")
+		return -1, fmt.Errorf("could not write methods to the server")
 	}
 	_, err = io.ReadFull(serverConn, buf[:])
 	if err != nil {
-		return fmt.Errorf("could not read handshake reply from the server")
+		return -1, fmt.Errorf("could not read handshake reply from the server")
 	}
 	_, err = clientConn.Write(buf[:])
 	if err != nil {
-		return fmt.Errorf("could not write handshake reply to the client")
+		return -1, fmt.Errorf("could not write handshake reply to the client")
 	}
-	return nil
+	authCode = int(buf[1])
+	return authCode, nil
+}
+
+func handleAuth(authCode int, clientConn, serverConn io.ReadWriter) error {
+	handler, err := auth.GetAuthMethod(authCode)
+	if err != nil {
+		return err
+	}
+
+	return handler.Handle(clientConn, serverConn)
 }
 
 type addrType byte
